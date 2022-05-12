@@ -2,6 +2,7 @@ const http = require('http');
 const path = require('path');
 const express = require('express');
 const router = require('./router');
+const { startApplication } = require('./app')
 
 // Create Express webapp
 const app = express();
@@ -19,4 +20,6 @@ const port = process.env.PORT || 3000;
 
 server.listen(port, function () {
   console.log("Express server running on *:" + port);
+
+  startApplication();
 });

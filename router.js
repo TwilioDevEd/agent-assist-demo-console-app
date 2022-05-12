@@ -2,130 +2,104 @@ const Router = require('express').Router;
 const router = new Router();
 const VoiceResponse = require('twilio').twiml.VoiceResponse;
 var colors = require('colors');
-const { response } = require('express');
-
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-
-const client = require('twilio')(accountSid, authToken);
+require('dotenv').config();
+const agentPhoneNumber = process.env.AGENT_PHONE_NUMBER;
+const {
+    updatePaySession, 
+    completePaySession, 
+    getPaymentAmount, 
+    startPaySession
+} = require('./app');
 
 let callSid, paymentSid;
 
-router.post("/status-callback", async (request, response) => {
+const line = "_____________________________________________________________________";
 
-    console.log(`_____________________________________________________________________`.green)
-    console.log(`status-callback: ${request.query.source} \n`.green)
+router.post("/start-status-callback", async (request, response) => {
+    paymentSid = request.body.Sid;    
+    // console.log('\n'.bgBlue);
+    // console.log("\nInside /start-status-callback endpoint".bgBlue);
+    // console.log(request.body);
+    // console.log('\n'.bgBlue);
+    response.end();
+})
 
-    if (request.query.source === "update") {
-        let currentlyUpdatingField; 
+router.post("/complete-status-callback", async (request, response) => {
 
-        switch (request.body.Capture) {
-            case 'payment-card-number': 
-                currentlyUpdatingField = request.body.PaymentCardNumber;
-                break;
-            case 'security-code':
-                currentlyUpdatingField = request.body.SecurityCode;
-                break;
-            case 'postal-code': 
-                currentlyUpdatingField = request.body.PaymentCardPostalCode;
-                break;
-            case 'expiration-date':
-                currentlyUpdatingField = request.body.ExpirationDate;
-                break;
-            default: 
-                currentlyUpdatingField = null;
-        }
+    console.log(`${line}`.rainbow)
+   
+    console.log("\nInside /complete-status-callback endpoint")
+    console.log(`Payment Complete!\n`)
+    console.log(request.body)
 
-        if (request.body.PartialResult) {
-            console.log(`Customer is entering ${request.body.Capture}: ${currentlyUpdatingField}`)
-        } else if (request.body.ErrorType) {
-            console.log(`Error when entering ${request.body.Capture}. Error Type: ${request.body.ErrorType}.`.bgRed)
+    console.log(`${line}`.rainbow)
+    response.end();
+    process.exit(0);
+
+})
+
+function getCurrentCustomerInput(requestBody) {
+    switch (requestBody.Capture) {
+        case 'payment-card-number': 
+            return requestBody.PaymentCardNumber;
+        case 'security-code':
+            return requestBody.SecurityCode;
+        case 'postal-code': 
+            return requestBody.PaymentCardPostalCode;
+        case 'expiration-date':
+            return requestBody.ExpirationDate;
+        default: 
+            return null;
+    }
+}
+
+router.post("/update-status-callback", async (request, response) => {
+    console.log(`${line}`.green);
+    console.log("\nInside /update-status-callback endpoint\n")
+
+    // PartialResult means that a customer is entering a field and it has
+    // not been filled in all the way yet
+    if (request.body.PartialResult) {
+            const currentCustomerInput = getCurrentCustomerInput(request.body)      
+            console.log(`Customer is entering ${request.body.Capture}: ${currentCustomerInput}`)
+
+    // If there's an error, we'll retry capturing that payment step's information again. 
+    // We use the /update-pay-session endpoint, which will update the Payment Resource to let it know
+    // we want to try capturing that information again. 
+    } else if (request.body.ErrorType) {
+        console.log(`${line}`.red);
+        console.log(`Error when entering ${request.body.Capture}. Error Type: ${request.body.ErrorType}.\n`)
+        console.log(`${line}`.red);
+
+        await updatePaySession(request.body.Capture, callSid);    
+    } else {
+        let message = `\nCustomer finished entering ${request.body.Capture}.\n`
+
+        if (request.body.Required) {
+            const stillNeededFields = request.body.Required.split(',');
+            console.log(`${message}Will capture ${stillNeededFields[0]} next ...`)
+            console.log(`${line}`.green);
+            await updatePaySession(stillNeededFields[0], callSid)
         } else {
-            console.log(`Customer finished entering ${request.body.Capture}. Fields still needed: ${request.body.Required || 'none'}`)
+            message += `All fields have been captured. Completing Pay Session ...`;
+            console.log(`${message}`)
+            console.log(`${line}`.green);
+            await completePaySession(callSid, paymentSid) 
         }
     }
-
-    if (request.query.source === "complete") {
-        console.log(`Payment Complete: `.rainbow)
-        console.log(request.body)
-    }
-
-    console.log(`_____________________________________________________________________`.green)
 
     response.end();
 })
 
-router.post("/start-pay-session", async (request, response) => {
-    console.log(`_____________________________________________________________________`.yellow)
-    console.log(`start-pay-session \n`.yellow)
-  
-    const payment = await client.calls(callSid)
-        .payments
-        .create({
-            chargeAmount: request.query.paymentAmount,
-            paymentConnector: 'My_Pay_Connector',
-            paymentMethod: request.query.paymentMethod, 
-            idempotencyKey: callSid, 
-            statusCallback: `https://bdelvalle.ngrok.io/status-callback?source=start`
-        });
-
-    paymentSid = payment.sid
-
-    console.log(`Payment Started! Payment Sid: ${paymentSid}`.yellow)
-    console.log(`_____________________________________________________________________`.yellow)
-
-
-    response.status(200).send({ paymentSid: payment.sid });
-});
-
-router.post("/update-pay-session", async (request, response) => {
-    console.log(`_____________________________________________________________________`.green)
-    console.log(`update-pay-session \n`.green.bgBlack)
-
-    const result = await client.calls(callSid)
-        .payments(paymentSid)
-        .update({
-            capture: request.query.paymentStep,
-            idempotencyKey: callSid,
-            statusCallback: `https://bdelvalle.ngrok.io/status-callback?source=update`
-        });
-
-    console.log(`Pay Session Updated, ready to collect ${request.query.paymentStep}`.green)
-    // console.log(result);
-
-    console.log(`_____________________________________________________________________`.green)
-
-
-    response.status(200).send(`Pay Session Updated, ready to collect ${request.query.paymentStep}`)
+// This closes the program in the event that one of the callers hangs up. 
+router.post('/end-call', (request,response) => {
+    console.log(`Call ended. Closing application. Restart with command: npm run start`);
+    response.send();
+    process.exit(0);
 })
 
-router.post("/complete-pay-session", async (request, response) => {
-
-    console.log(`_____________________________________________________________________`.cyan)
-    console.log('complete-pay-session \n'.cyan)
-
-    
-    try {
-        await client.calls(callSid)
-            .payments(paymentSid)
-            .update({
-                status: 'complete',
-                idempotencyKey: callSid,
-                statusCallback: `https://bdelvalle.ngrok.io/status-callback?source=complete`
-            });
-
-        console.log(`Payment Complete!`.cyan)
-
-        response.send(`Payment Complete!`)
-    } catch (error) {
-        console.log(`Error! Not all of the payment information was collected!`.bgRed)
-        response.send(`Error! ${error.message}`)
-    }
-       
-    console.log(`_____________________________________________________________________`.cyan)
-    
-})
-
+// We have a Twilio phone number configured to point to this endpoint
+// This TwiML dials our "agent"
 router.post("/twiml", (request, response) => {
     response.type('xml');
 
@@ -133,30 +107,25 @@ router.post("/twiml", (request, response) => {
 
     const twiml = new VoiceResponse();
     const dial = twiml.dial({
-        callerId: '+19789612713',
+        callerId: agentPhoneNumber,
+        action: '/end-call',
         record: 'record-from-answer-dual', 
-        recordingStatusCallback: 'https://bdelvalle.ngrok.io/recording-status-callback'
     });
     dial.number({
         statusCallbackEvent: 'answered',
-        statusCallback: 'https://bdelvalle.ngrok.io/dial-status-callback'
-    },'+17204601666')
-    
+        statusCallback: `/dial-status-callback`
+    }, agentPhoneNumber)
     response.send(twiml.toString());
-
 });
 
-router.post('/recording-status-callback', (request, response) => {
-    console.log(`_____________________________________________________________________`.blue)
-    console.log('Recording Status Callback \n'.blue)
-    console.log(`Recording URL: ${request.body.RecordingUrl}.mp3`);
- 
-    console.log(`_____________________________________________________________________`.blue)    
-    response.send()
-})
-
+// Here, we grab the parent Call SID and use it when we start the
+// Payment session. The parent call is the leg in which the customer dialed 
+// our Twilio number (our "agent");
 router.post("/dial-status-callback", async (request, response) => {
     callSid = request.body.ParentCallSid;
+    const paymentAmount = await getPaymentAmount();
+    await startPaySession(paymentAmount, callSid);
+    await updatePaySession('payment-card-number', callSid);
     response.send();
 })
 
