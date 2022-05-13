@@ -3,8 +3,8 @@ var colors = require('colors');
 const fetch = require('node-fetch')
 require('dotenv').config();
 
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
+const accountSid = process.env.ACCOUNT_SID;
+const authToken = process.env.AUTH_TOKEN;
 const baseUrl = `https://${process.env.YOUR_NGROK_DOMAIN}`;
 const client = require('twilio')(accountSid, authToken);
 const paymentConnector = process.env.YOUR_PAYMENT_CONNECTOR_NAME;
@@ -19,7 +19,7 @@ exports.startApplication = async function startApplication() {
   }
 
   console.log(`${line}`.rainbow)
-  console.log(`\nHave the customer call the agent at: ${process.env.AGENT_PHONE_NUMBER}`);
+  console.log(`\nHave the customer call the agent at: ${process.env.YOUR_TWILIO_NUMBER}`);
   console.log(`${line}\n`.rainbow)
 }
 
@@ -39,7 +39,7 @@ exports.getPaymentAmount = async function getPaymentAmount() {
 
 exports.startPaySession = async function startPaySession(paymentAmount, callSid) {
     console.log(`${line}`.yellow)
-    console.log(`\nInside /start-pay-session endpoint.`.yellow)
+    console.log(`\nInside stardPaySession function.`.yellow)
     console.log(`This is where we use the Payment Resource to start a payment session`.yellow)
 
     if (!callSid) {
