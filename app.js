@@ -5,7 +5,7 @@ require('dotenv').config();
 
 const accountSid = process.env.ACCOUNT_SID;
 const authToken = process.env.AUTH_TOKEN;
-const baseUrl = `https://${process.env.YOUR_NGROK_DOMAIN}`;
+const baseUrl = `${process.env.YOUR_NGROK_DOMAIN}`;
 const client = require('twilio')(accountSid, authToken);
 const paymentConnector = process.env.YOUR_PAYMENT_CONNECTOR_NAME;
 
